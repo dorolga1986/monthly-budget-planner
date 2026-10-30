@@ -245,8 +245,12 @@
           <div class="card-label">Доход за месяц</div>
         </div>
         <div>
-          <div class="stat-value" id="incomeDisplay">0 ₸</div>
-          <div class="stat-foot">Сумма всех источников</div>
+          <div class="stat-input-row">
+            <label class="sr-only" for="incomeInput">Общая сумма доходов за месяц</label>
+            <input class="stat-value-input" id="incomeInput" type="number" min="0" step="10000" value="0" inputmode="numeric">
+            <span class="stat-currency" id="incomeCurrency">₸</span>
+          </div>
+          <div class="stat-foot">Введите сумму или укажите источники</div>
         </div>
       </article>
       <article class="card stat-card">
@@ -276,6 +280,7 @@
           <button class="text-button" id="addIncomeButton" type="button">＋ Источник</button>
         </div>
         <div class="income-list" id="incomeList" aria-label="Источники дохода"></div>
+        <div class="unallocated-row" id="unallocatedIncomeRow" hidden><span>Не указано в источниках</span><strong id="unallocatedIncomeTotal">0 ₸</strong></div>
         <div class="category-total"><span>Всего доходов</span><span id="incomeTotal">0 ₸</span></div>
         <div class="section-caption">Основные расходы</div>
         <div class="category-list" id="categoryList" aria-label="Категории расходов"></div>
@@ -347,7 +352,7 @@
         { name: 'Здоровье', amount: 0 }
       ];
       const initialState = {
-        month: '2026-11', currency: 'KZT', incomeSources: [{ name: 'Источник дохода', amount: 0 }], savings: 0, expenseTotal: null,
+        month: '2026-11', currency: 'KZT', incomeSources: [{ name: 'Источник дохода', amount: 0 }], savings: 0, incomeTotal: null, expenseTotal: null,
         categories: structuredClone(defaultCategories)
       };
       const icons = {
@@ -380,6 +385,7 @@
           incomeSources: incomeSources.map(item => ({ name: String(item.name ?? ''), amount: safeNumber(item.amount) })),
           categories: Array.isArray(value.categories) ? value.categories.map(item => ({ name: String(item.name ?? ''), amount: safeNumber(item.amount) })) : [],
           savings: safeNumber(value.savings),
+          incomeTotal: Number.isFinite(Number(value.incomeTotal)) && value.incomeTotal !== null ? safeNumber(value.incomeTotal) : null,
           expenseTotal: Number.isFinite(Number(value.expenseTotal)) && value.expenseTotal !== null ? safeNumber(value.expenseTotal) : null
         };
       }
@@ -407,7 +413,7 @@
 
       function saveState() {
         budgets[state.month] = state;
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 4, budgets })); } catch { /* Storage can be unavailable in private browsing. */ }
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 5, budgets })); } catch { /* Storage can be unavailable in private browsing. */ }
       }
 
       function monthLabel(month) {
@@ -492,7 +498,10 @@
       }
 
       function update() {
-        const income = state.incomeSources.reduce((sum, item) => sum + safeNumber(item.amount), 0);
+        const sourceIncome = state.incomeSources.reduce((sum, item) => sum + safeNumber(item.amount), 0);
+        if (state.incomeTotal !== null && state.incomeTotal < sourceIncome) state.incomeTotal = sourceIncome;
+        const income = Math.max(sourceIncome, state.incomeTotal === null ? sourceIncome : safeNumber(state.incomeTotal));
+        const unallocatedIncome = income - sourceIncome;
         const categoryExpenses = state.categories.reduce((sum, item) => sum + safeNumber(item.amount), 0);
         if (state.expenseTotal !== null && state.expenseTotal < categoryExpenses) state.expenseTotal = categoryExpenses;
         const expenses = Math.max(categoryExpenses, state.expenseTotal === null ? categoryExpenses : safeNumber(state.expenseTotal));
@@ -503,8 +512,11 @@
         document.getElementById('remainingValue').style.color = remaining < 0 ? '#ffd2c8' : 'white';
         document.getElementById('expenseInput').value = expenses;
         document.getElementById('expenseCurrency').textContent = currencySymbols[state.currency];
-        document.getElementById('incomeDisplay').textContent = formatMoney(income);
+        document.getElementById('incomeInput').value = income;
+        document.getElementById('incomeCurrency').textContent = currencySymbols[state.currency];
         document.getElementById('incomeTotal').textContent = formatMoney(income);
+        document.getElementById('unallocatedIncomeTotal').textContent = formatMoney(unallocatedIncome);
+        document.getElementById('unallocatedIncomeRow').hidden = unallocatedIncome <= 0;
         document.getElementById('expenseTotal').textContent = formatMoney(expenses);
         document.getElementById('unallocatedExpenseTotal').textContent = formatMoney(unallocatedExpenses);
         document.getElementById('unallocatedExpenseRow').hidden = unallocatedExpenses <= 0;
@@ -534,6 +546,7 @@
       document.getElementById('monthSelect').addEventListener('change', event => showBudget(event.target.value));
       document.getElementById('currencyInput').value = state.currency;
       document.getElementById('currencyInput').addEventListener('change', event => { state.currency = event.target.value; renderIncomeSources(); renderCategories(); update(); });
+      document.getElementById('incomeInput').addEventListener('input', event => { state.incomeTotal = safeNumber(event.target.value); update(); });
       document.getElementById('expenseInput').addEventListener('input', event => { state.expenseTotal = safeNumber(event.target.value); update(); });
       document.getElementById('savingsInput').value = state.savings;
       document.getElementById('savingsInput').addEventListener('input', event => { state.savings = safeNumber(event.target.value); update(); });
