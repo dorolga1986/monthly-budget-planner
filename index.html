@@ -67,6 +67,8 @@
     .stat-value { font-size: 23px; font-weight: 680; letter-spacing: -.7px; margin-top: 6px; }
     .stat-value-input { display: block; width: 100%; min-width: 0; padding: 3px 0; border: 0; border-bottom: 1px solid transparent; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 23px; font-weight: 680; letter-spacing: -.7px; font-variant-numeric: tabular-nums; }
     .stat-value-input:focus { border-bottom-color: var(--green); }
+    .stat-input-row { display: flex; align-items: baseline; gap: 5px; margin-top: 6px; }
+    .stat-currency { flex: none; color: #7e8981; font-size: 12px; }
     .stat-foot { color: #a0a69f; font-size: 11px; margin-top: 5px; }
 
     .content-grid { display: grid; grid-template-columns: minmax(0, 1.28fr) minmax(310px, .82fr); gap: 18px; align-items: start; }
@@ -95,6 +97,8 @@
     .remove-button svg { width: 14px; height: 14px; }
     .category-total { display: flex; justify-content: space-between; align-items: center; padding: 15px 2px 0; font-size: 12px; font-weight: 700; }
     .category-total span:last-child { font-variant-numeric: tabular-nums; }
+    .unallocated-row { display: flex; justify-content: space-between; padding: 10px 2px 0; color: #929a93; font-size: 11px; }
+    .unallocated-row[hidden] { display: none; }
 
     .side-stack { display: grid; gap: 18px; }
     .savings-card { padding: 22px 23px 20px; }
@@ -251,7 +255,11 @@
           <div class="card-label">Запланировано расходов</div>
         </div>
         <div>
-          <div class="stat-value" id="expenseDisplay">0 ₸</div>
+          <div class="stat-input-row">
+            <label class="sr-only" for="expenseInput">Общая сумма расходов за месяц</label>
+            <input class="stat-value-input" id="expenseInput" type="number" min="0" step="1000" value="0" inputmode="numeric">
+            <span class="stat-currency" id="expenseCurrency">₸</span>
+          </div>
           <div class="stat-foot" id="expensePercent">0% от дохода</div>
         </div>
       </article>
@@ -260,7 +268,7 @@
     <section class="content-grid">
       <article class="card panel">
         <div class="panel-heading">
-          <div><h2>План расходов</h2><p class="panel-subtitle">Укажите сумму для каждой категории</p></div>
+          <div><h2>План расходов</h2><p class="panel-subtitle">Введите общую сумму или распределите её по категориям</p></div>
           <button class="text-button" id="addCategoryButton" type="button" aria-label="Добавить расход">＋ Добавить расход</button>
         </div>
         <div class="panel-heading" style="margin-top:2px;margin-bottom:10px;align-items:center">
@@ -271,6 +279,7 @@
         <div class="category-total"><span>Всего доходов</span><span id="incomeTotal">0 ₸</span></div>
         <div class="section-caption">Основные расходы</div>
         <div class="category-list" id="categoryList" aria-label="Категории расходов"></div>
+        <div class="unallocated-row" id="unallocatedExpenseRow" hidden><span>Не распределено по категориям</span><strong id="unallocatedExpenseTotal">0 ₸</strong></div>
         <div class="category-total"><span>Всего расходов</span><span id="expenseTotal">0 ₸</span></div>
       </article>
 
@@ -338,7 +347,7 @@
         { name: 'Здоровье', amount: 0 }
       ];
       const initialState = {
-        month: '2026-11', currency: 'KZT', incomeSources: [{ name: 'Источник дохода', amount: 0 }], savings: 0,
+        month: '2026-11', currency: 'KZT', incomeSources: [{ name: 'Источник дохода', amount: 0 }], savings: 0, expenseTotal: null,
         categories: structuredClone(defaultCategories)
       };
       const icons = {
@@ -370,7 +379,8 @@
           currency: currencySymbols[value.currency] ? value.currency : 'KZT',
           incomeSources: incomeSources.map(item => ({ name: String(item.name ?? ''), amount: safeNumber(item.amount) })),
           categories: Array.isArray(value.categories) ? value.categories.map(item => ({ name: String(item.name ?? ''), amount: safeNumber(item.amount) })) : [],
-          savings: safeNumber(value.savings)
+          savings: safeNumber(value.savings),
+          expenseTotal: Number.isFinite(Number(value.expenseTotal)) && value.expenseTotal !== null ? safeNumber(value.expenseTotal) : null
         };
       }
 
@@ -397,7 +407,7 @@
 
       function saveState() {
         budgets[state.month] = state;
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, budgets })); } catch { /* Storage can be unavailable in private browsing. */ }
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 4, budgets })); } catch { /* Storage can be unavailable in private browsing. */ }
       }
 
       function monthLabel(month) {
@@ -483,15 +493,21 @@
 
       function update() {
         const income = state.incomeSources.reduce((sum, item) => sum + safeNumber(item.amount), 0);
-        const expenses = state.categories.reduce((sum, item) => sum + safeNumber(item.amount), 0);
+        const categoryExpenses = state.categories.reduce((sum, item) => sum + safeNumber(item.amount), 0);
+        if (state.expenseTotal !== null && state.expenseTotal < categoryExpenses) state.expenseTotal = categoryExpenses;
+        const expenses = Math.max(categoryExpenses, state.expenseTotal === null ? categoryExpenses : safeNumber(state.expenseTotal));
+        const unallocatedExpenses = expenses - categoryExpenses;
         const savings = safeNumber(state.savings);
         const remaining = income - expenses - savings;
         document.getElementById('remainingValue').textContent = formatMoney(remaining);
         document.getElementById('remainingValue').style.color = remaining < 0 ? '#ffd2c8' : 'white';
-        document.getElementById('expenseDisplay').textContent = formatMoney(expenses);
+        document.getElementById('expenseInput').value = expenses;
+        document.getElementById('expenseCurrency').textContent = currencySymbols[state.currency];
         document.getElementById('incomeDisplay').textContent = formatMoney(income);
         document.getElementById('incomeTotal').textContent = formatMoney(income);
         document.getElementById('expenseTotal').textContent = formatMoney(expenses);
+        document.getElementById('unallocatedExpenseTotal').textContent = formatMoney(unallocatedExpenses);
+        document.getElementById('unallocatedExpenseRow').hidden = unallocatedExpenses <= 0;
         document.getElementById('expensePercent').textContent = `${income ? Math.round(expenses / income * 100) : 0}% от дохода`;
         document.getElementById('summaryIncome').textContent = formatMoney(income);
         document.getElementById('summaryExpenses').textContent = `−${formatMoney(expenses)}`;
@@ -518,6 +534,7 @@
       document.getElementById('monthSelect').addEventListener('change', event => showBudget(event.target.value));
       document.getElementById('currencyInput').value = state.currency;
       document.getElementById('currencyInput').addEventListener('change', event => { state.currency = event.target.value; renderIncomeSources(); renderCategories(); update(); });
+      document.getElementById('expenseInput').addEventListener('input', event => { state.expenseTotal = safeNumber(event.target.value); update(); });
       document.getElementById('savingsInput').value = state.savings;
       document.getElementById('savingsInput').addEventListener('input', event => { state.savings = safeNumber(event.target.value); update(); });
       document.getElementById('addIncomeButton').addEventListener('click', () => {
